@@ -1,3 +1,8 @@
+import logging
+
+# Отключаем все логи для всей программы
+logging.disable(logging.CRITICAL)
+
 def is_record_exists(service, sheet_name, spreadsheet_id, search_value):
     range_to_check = f'{sheet_name}!B:B'
     response = service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=range_to_check).execute()
@@ -7,11 +12,15 @@ def is_record_exists(service, sheet_name, spreadsheet_id, search_value):
 def updateSpreadsheet(service, data, spreadsheet_id, sheet_name, file_id):
     data1, size, data2, data3, data4 = data[0], data[1], data[2], data[3], data[4]
     file_view_link = f"https://drive.google.com/file/d/{file_id}/view?usp=sharing"
-
-    range_to_insert = f'{sheet_name}!A{len(service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=f"{sheet_name}!B:B").execute().get("values", [])) + 1}:H'
-    hyperlink_formula = f'=ГИПЕРССЫЛКА("{data4}"; "тык")'
-    hyperlink_file = f'=ГИПЕРССЫЛКА("{file_view_link}"; "и тут тык")'
-    data_to_insert = [['', data1, '', data2, data3, hyperlink_formula, hyperlink_file, size]]
+    if spreadsheet_id == "1UXDZ_UEGvAP0cyLNVDbC3aBXB77tCuKULmtZPAReRj4":
+        range_to_insert = f'{sheet_name}!A{len(service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=f"{sheet_name}!B:B").execute().get("values", [])) + 1}:H'
+        hyperlink_formula = f'=ГИПЕРССЫЛКА("{data4}"; "тык")'
+        hyperlink_file = f'=ГИПЕРССЫЛКА("{file_view_link}"; "и тут тык")'
+        data_to_insert = [['', data1, '', data2, data3, hyperlink_formula, hyperlink_file, size]]
+    else:
+        range_to_insert = f'{sheet_name}!A{len(service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=f"{sheet_name}!B:B").execute().get("values", [])) + 1}:H'
+        hyperlink_formula = f'=ГИПЕРССЫЛКА("{data4}"; "тык")'
+        data_to_insert = [['', data1, '', data2, data3, hyperlink_formula, size]]
 
     request = service.spreadsheets().values().update(
         spreadsheetId=spreadsheet_id,
@@ -46,3 +55,10 @@ def updateSpreadsheetUP(service, data, spreadsheet_id):
         print("Данные успешно обновлены!")
     except Exception as e:
         print(f"Ошибка при обновлении таблицы: {e}")
+
+def get_sheets_titles(service, spreadsheet_id):
+    sheet_metadata = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    sheets = sheet_metadata.get('sheets', [])
+    sheet_titles = [sheet['properties']['title'] for sheet in sheets]
+    sheet_id = [sheet['properties']['sheetId'] for sheet in sheets]
+    return sheet_titles, sheet_id

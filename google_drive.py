@@ -4,7 +4,6 @@ import logging
 import time
 from googleapiclient.errors import HttpError
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def upload_to_google_drive(service, file_path, email, folder_id=None):
     file_metadata = {'name': os.path.basename(file_path), 'parents': [folder_id] if folder_id else []}

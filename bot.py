@@ -1,22 +1,28 @@
-import os  # Импортируем модуль для работы с файловой системой
+import random
+import configparser
+import re
 
 import gspread
 import telebot  # Импортируем модуль для работы с Telegram Bot API
+from oauth2client.service_account import ServiceAccountCredentials
+
 from telebot import types  # Импортируем классы для создания кнопок и клавиатур в Telegram
 from google_service import get_google_service  # Импортируем функцию для получения сервиса Google API
-from google_drive import upload_to_google_drive  # Импортируем функцию для загрузки файлов на Google Drive
-from google_sheets import is_record_exists, updateSpreadsheet  # Импортируем функции для работы с Google Sheets
-from epub_handle import readBook  # Импортируем функцию для чтения EPUB файлов
-import re
-import configparser
+from epub_handle import readBook, document  # Импортируем функцию для чтения EPUB файлов
+from sql import init_db, add_new_user, get_user_settings, update_sheet_name, update_spreadsheet, get_user_settings2
+
+import logging
+
+# Отключаем все логи для всей программы
+logging.disable(logging.CRITICAL)
+
 
 config = configparser.ConfigParser()
 config.read('config.ini', encoding='utf-8')
 
 token = config.get('bot', 'token')
-CREDENTIALS_FILE = config.get('google','CREDENTIALS_FILE')
-SPREADSHEET_ID = config.get('google', 'SPREADSHEET_ID')
-SHEET_NAME = config.get('google', 'SHEET_NAME')
+admin = config.get('bot', 'AUTHORIZED_CHAT_ID')
+CREDENTIALS_FILE = config.get('google', 'CREDENTIALS_FILE')
 FOLDER_ID = config.get('google', 'FOLDER_ID')
 EMAIL_TO_SHARE = config.get('google', 'EMAIL_TO_SHARE')
 
@@ -25,115 +31,201 @@ ITEMS_PER_PAGE = 4
 bot = telebot.TeleBot(token)  # Создаем экземпляр бота с указанным токеном
 user_data = {}  # Словарь для хранения состояний пользователей
 
-UPLOAD_FOLDER = "uploads"  # Папка для загрузок
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)  # Создаем папку, если она не существует
 
-
-# Устанавливаем команды, которые будут отображаться в меню
 def set_bot_commands():
     commands = [
         telebot.types.BotCommand('/start', 'Начать работу с ботом'),
         telebot.types.BotCommand('/search', 'Поиск фанфиков'),
         telebot.types.BotCommand('/update', 'Обновить информацию о фанфике'),
-        telebot.types.BotCommand('/del', 'Удалить существующие названия')
+        telebot.types.BotCommand('/random', 'Выбрать случайное произведение'),
+        telebot.types.BotCommand('/add', 'Добавить произведение'),
+        telebot.types.BotCommand('/help', 'Помощь'),
+        telebot.types.BotCommand('/settings', 'Настройки')
     ]
     bot.set_my_commands(commands)
+
+
+@bot.message_handler(commands=['del'])
+def delete(message):
+    if str(message.chat.id).strip() == str(admin).strip():  # Проверка, является ли пользователь администратором
+        try:
+            delete_existing_titles()
+            bot.send_message(message.chat.id, "Удаление завершено успешно, пустые строки удалены.")
+        except Exception as e:
+            bot.send_message(message.chat.id, f"Произошла ошибка: {e}")
+    else:
+        bot.reply_to(message, "Эта команда доступна только администратору.")
+
 
 # Обработчик команды /start
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     bot.send_message(message.chat.id,
-                     "Привет, я бот, который поможет следить тебе за потребляемым контенотом. Просто отправь мне файл .epub")
+                     "Привет, я бот, который поможет следить тебе за потребляемым контентом. Я пока умею немного, но очень хочу помочь\n\n"
+                     "Вот пример того, как выглядит моя таблица \n"
+                     "https://docs.google.com/spreadsheets/d/1UDoYXpHov06Neix4UAcu-E4Kcy-yeDKjJlkR4NbA6OY/edit?usp=sharing\n"
+                     
+                     "Её можно настроить и добавить фильтры, но это базовая вещь. Cаму структуру советую оставить, потому что бот научен ставить галочки и оценку из списка\n\n\n"
+                     
+                    "Для начала работы зайди в /settings\n\n"
 
-# Функция для нормализации заголовков
-def normalize_title(title):
-    normalized = title.strip().lower()
-    normalized = re.sub(r'\[.*?\]', '', normalized)
-    normalized = re.sub(r'\s+', ' ', normalized)
-    normalized = re.sub(r'\s+', '', normalized)
-    return normalized
+                     "!!!ВАЖНО!!!\n"
+                     "- бот пока работает только с epub\n"
+                     "- Library в примере - лист, на который автоматически добалвяются фанфики, когда вы отправляете их в бот")
+    init_db()
+    # Добавляем нового пользователя или проверяем его существование в базе
+    add_new_user(message.chat.id)
 
-def delete_existing_titles(service, spreadsheet_id):
+@bot.message_handler(commands=['help'])
+def send_welcome(message):
+    bot.send_message(message.chat.id,
+                "/search - "
+                "Эта команда выведет список всех листов, на которых вы модете посмотреть все свои произведения\n\n"
+                "/random - "
+                "Эта команда выберет с любого листа непрочитанное произведение\n\n"
+                "/add - "
+                "Эта команда позволяет добавлять произведение на выбранный лист\n\n"
+                     "/update - "
+                "Эта команда поставит оценку произведению от 1 др 5 звезд\n\n"
+                     "/help - "
+                "Мы находимся здесь, тут ты сможешь вспомнить, что делает каждая кнопка\n\n"
+                     "/settings - "
+                "Больше не понадобится тебе, если только ты не захочешь сменить основной лист или таблицу в гугл таблице\n\n"
+                "Если что-то не так, напишите мне @allDrimiss.\nЯ правда стараюсь(")
+
+@bot.message_handler(commands=['settings'])
+def handle_settings(message):
+    # Запросим, что именно нужно изменить
+    bot.send_message(message.chat.id, "Тебе нужно:\n"
+                                      "- указать ссылку на гугл таблицу, где у тебя будет твоя коллекция\n"
+                                      "- указать название основного листа (где будут скаченные произведения)\n"
+                                      "- дать доступ для редактирования вот этой почте\n admin-369@readbooks-432315.iam.gserviceaccount.com\n\n"
+                                      "Это административная почта, я не смогу просматривать твои таблицы")
+    send_inline_buttons(message)
+
+
+def send_inline_buttons(message):
     try:
-        # Получаем названия из листа Library
-        library_response = service.spreadsheets().values().get(
-            spreadsheetId=spreadsheet_id,
-            range=f'Library!B4:B'
-        ).execute()
-        library_titles = [normalize_title(row[0]) for row in library_response.get('values', []) if row]
+        markup = types.InlineKeyboardMarkup()
 
-        def remove_titles_from_sheet(sheet_name):
-            # Получаем названия из указанного листа
-            sheet_response = service.spreadsheets().values().get(
-                spreadsheetId=spreadsheet_id,
-                range=f'{sheet_name}!B4:B'
-            ).execute()
-            sheet_titles = [row[0] for row in sheet_response.get('values', []) if row]
+        # Создаем две инлайн кнопки: одна для ввода адреса файла, другая - для ввода названия листа
+        button_spreadsheet = types.InlineKeyboardButton('Ссылка на Excel', callback_data='spreadsheet')
+        button_sheet_name = types.InlineKeyboardButton('Основная коллекция', callback_data='sheetMain_name')
 
-            # Удаляем названия, которые уже есть в Library
-            updated_titles = [[title] for title in sheet_titles if normalize_title(title) not in library_titles]
+        markup.add(button_spreadsheet, button_sheet_name)
 
-            # Обновляем лист
-            service.spreadsheets().values().clear(
-                spreadsheetId=spreadsheet_id,
-                range=f'{sheet_name}!B4:B'
-            ).execute()
-            if updated_titles:
-                service.spreadsheets().values().update(
-                    spreadsheetId=spreadsheet_id,
-                    range=f'{sheet_name}!B4',
-                    valueInputOption='RAW',
-                    body={'values': updated_titles}
-                ).execute()
-
-        # Удаляем названия из листов "ФФ ВРИ" и "Минсоны"
-        remove_titles_from_sheet('ФФ ВРИ')
-        remove_titles_from_sheet('Минсоны')
-
+        # Отправляем сообщение с инлайн кнопками
+        bot.send_message(message.chat.id, "Что вы хотите изменить?", reply_markup=markup)
     except Exception as e:
-        print(f"Произошла ошибка: {e}")
+        bot.send_message(message.chat.id, "Что-то не так. Попробуйте еще раз.")
+
+# Обработчик для кнопки 'spreadsheet' (изменить exelId)
+@bot.callback_query_handler(func=lambda call: call.data == 'spreadsheet')
+def handle_spreadsheet(call):
+    chat_id = call.message.chat.id
+    bot.send_message(chat_id, "Пожалуйста, отправьте адрес Excel. Но не забудьте нажать на крести, чтобы отправилась только ссылка")
+    bot.register_next_step_handler(call.message, update_spreadsheet)
 
 
-@bot.message_handler(commands=['del'])
-def handle_del(message):
-    try:
-        service = get_google_service('sheets', 'v4', ['https://www.googleapis.com/auth/spreadsheets'])
-        delete_existing_titles(service, SPREADSHEET_ID)
-        bot.send_message(message.chat.id, "Удаление завершено успешно, пустые строки удалены.")
-    except Exception as e:
-        bot.send_message(message.chat.id, f"Произошла ошибка: {e}")
+@bot.callback_query_handler(func=lambda call: call.data == 'sheetMain_name')
+def handle_sheet_name(call):
+    chat_id = call.message.chat.id
+    bot.send_message(chat_id, "Пожалуйста, отправьте название основного листа.")
+    bot.register_next_step_handler(call.message, update_sheet_name)
+
+
+@bot.message_handler(commands=['random'])
+def handle_random(message):
+    random_fic(message)
 
 
 @bot.message_handler(commands=['search'])
 def handle_search(message):
     try:
+        search(message)
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Произошла ошибка при получении листов: {e}")
+
+
+@bot.message_handler(commands=['add'])
+def send_add(message):
+    bot.send_message(message.chat.id,
+                     "Выберите лист куда хотите добавить произведение")
+    try:
+        need = get_user_settings(message)
+
         # Подключаемся к Google Sheets
         service = get_google_service('sheets', 'v4', ['https://www.googleapis.com/auth/spreadsheets',
                                                       'https://www.googleapis.com/auth/drive'])
 
-        # Получаем названия всех листов в таблице
-        sheets_metadata = service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
+        sheets_metadata = service.spreadsheets().get(spreadsheetId=need[0]).execute()
         sheet_names = [sheet['properties']['title'] for sheet in sheets_metadata['sheets']]
 
-        # Исключаем лист "Library" из поиска
-        sheet_names.remove(SHEET_NAME)
+        sheet_names.remove(need[1])
 
-        # Создаем инлайн-кнопки для каждого листа
         inline_markup = types.InlineKeyboardMarkup()
         for sheet_name in sheet_names:
-            inline_markup.add(types.InlineKeyboardButton(text=sheet_name, callback_data=f"sheet_{sheet_name}"))
+            inline_markup.add(types.InlineKeyboardButton(text=sheet_name, callback_data=f"sheet_add_{sheet_name}"))
 
-        # Отправляем инлайн-кнопки пользователю
         bot.send_message(message.chat.id, "Выберите лист для просмотра:", reply_markup=inline_markup)
 
     except Exception as e:
         bot.send_message(message.chat.id, f"Произошла ошибка при получении листов: {e}")
 
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("sheet_add_"))
+def handle_sheet_addition(call):
+    sheet_name = call.data[len("sheet_add_"):]
+    try:
+        bot.send_message(call.message.chat.id,
+                         f"Вы выбрали лист {sheet_name}. Введите данные для добавления в таблицу:")
+
+        bot.register_next_step_handler(call.message, lambda message: add_to_sheet(message, sheet_name))
+
+    except Exception as e:
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id,
+                              text=f"Произошла ошибка: {e}", parse_mode='Markdown')
+
+
+def add_to_sheet(message, sheet_name):
+    try:
+        service = get_google_service('sheets', 'v4', ['https://www.googleapis.com/auth/spreadsheets',
+                                                      'https://www.googleapis.com/auth/drive'])
+        need = get_user_settings(message)
+        # Сначала получим существующие данные столбца B
+        result = service.spreadsheets().values().get(
+            spreadsheetId=need[0],
+            range=f'{sheet_name}!B:B'
+        ).execute()
+
+        # Определяем следующую пустую строку
+        values = result.get('values', [])
+        next_row = len(values) + 1
+
+        # Указываем конкретную ячейку для вставки
+        range_to_append = f'{sheet_name}!B{next_row}'
+
+        user_message = message.text
+        body = {
+            'values': [[user_message]]
+        }
+
+        service.spreadsheets().values().update(
+            spreadsheetId=need[0],
+            range=range_to_append,
+            valueInputOption='RAW',
+            body=body
+        ).execute()
+
+        bot.send_message(message.chat.id, "Ваше сообщение успешно добавлено в таблицу!")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Произошла ошибка: {e}")
+
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("sheet_"))
 def handle_sheet_selection(call):
     sheet_name = call.data[len("sheet_"):]
+    need = get_user_settings(call.message)
     try:
         # Подключаемся к Google Sheets
         service = get_google_service('sheets', 'v4', ['https://www.googleapis.com/auth/spreadsheets',
@@ -141,7 +233,7 @@ def handle_sheet_selection(call):
 
         # Получаем данные из указанного диапазона на выбранном листе
         response = service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID,
+            spreadsheetId=need[0],
             range=f'{sheet_name}!B4:B'
         ).execute()
 
@@ -164,39 +256,8 @@ def handle_sheet_selection(call):
 
 @bot.message_handler(content_types=['document'])
 def handle_document(message):
-    if message.document.mime_type == 'application/epub+zip':  # Проверяем, что тип файла - EPUB
-        file_info = bot.get_file(message.document.file_id)  # Получаем информацию о файле
-        file_path = os.path.join(UPLOAD_FOLDER, message.document.file_name)  # Определяем путь для сохранения файла
+    document(message)
 
-        try:
-            # Загружаем файл из Telegram
-            response = bot.download_file(file_info.file_path)
-            with open(file_path, 'wb') as file:
-                file.write(response)  # Сохраняем файл на диск
-
-            # Читаем EPUB файл
-            book_data = readBook(file_path)
-            if book_data:
-                # Проверяем, существует ли книга в Google Sheets
-                service = get_google_service('sheets', 'v4', ['https://www.googleapis.com/auth/spreadsheets',
-                                                              'https://www.googleapis.com/auth/drive'])
-                if is_record_exists(service, SHEET_NAME, SPREADSHEET_ID, book_data[0]):
-                    bot.send_message(message.chat.id, f"Уже есть такой, сорри. \nУже добавляли: \"{book_data[0]}\"")
-                else:
-                    # Загружаем файл на Google Drive и обновляем Google Sheets
-                    drive_service = get_google_service('drive', 'v3', ['https://www.googleapis.com/auth/drive.file'])
-                    drive_file_id = upload_to_google_drive(drive_service, file_path, EMAIL_TO_SHARE, FOLDER_ID)
-                    if drive_file_id:
-                        updateSpreadsheet(service, book_data, SPREADSHEET_ID, SHEET_NAME, drive_file_id)
-                        bot.send_message(message.chat.id, f"Я всё сделал хозяюшка. \nДобавил: {book_data[0]}")
-                    else:
-                        bot.send_message(message.chat.id, "Ошибка при загрузке файла на Google Диск.")
-            else:
-                bot.send_message(message.chat.id, "Не удалось извлечь данные из книги.")
-        except Exception as e:
-            bot.send_message(message.chat.id, f"Произошла ошибка: {e}")
-    else:
-        bot.send_message(message.chat.id, "Пожалуйста, отправьте файл .epub.")
 
 # Получение названий листов в Google Sheets
 def get_sheets_titles(service, spreadsheet_id):
@@ -206,17 +267,18 @@ def get_sheets_titles(service, spreadsheet_id):
     sheet_id = [sheet['properties']['sheetId'] for sheet in sheets]
     return sheet_titles, sheet_id
 
+
 @bot.message_handler(commands=['update'])
 def handle_update(message):
     bot.send_message(message.chat.id, "Выберите лист, в котором хотите искать:")
-
+    need = get_user_settings(message)
     # Подключаемся к Google Sheets
     service = get_google_service('sheets', 'v4', ['https://www.googleapis.com/auth/spreadsheets',
                                                   'https://www.googleapis.com/auth/drive'])
 
     # Получаем названия листов
-    sheet_titles, sheet_ids = get_sheets_titles(service, SPREADSHEET_ID)
-
+    sheet_titles, sheet_ids = get_sheets_titles(service, need[0])
+    print(need)
     # Создаем инлайн-кнопки с названиями листов
     inline_markup = types.InlineKeyboardMarkup()
     i = 0
@@ -227,6 +289,7 @@ def handle_update(message):
     # Отправляем инлайн-кнопки пользователю
     bot.send_message(message.chat.id, "Выберите лист:", reply_markup=inline_markup)
 
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith('sheetUp_'))
 def handle_sheet_selection(call):
     selected_sheet = call.data[len('sheetUp_'):]  # Получаем выбранное название листа
@@ -234,9 +297,10 @@ def handle_sheet_selection(call):
     # Подключаемся к Google Sheets
     service = get_google_service('sheets', 'v4', ['https://www.googleapis.com/auth/spreadsheets',
                                                   'https://www.googleapis.com/auth/drive'])
+    need = get_user_settings(call.message)
 
     # Получаем названия листов
-    sheet_titles, sheet_ids = get_sheets_titles(service, SPREADSHEET_ID)
+    sheet_titles, sheet_ids = get_sheets_titles(service, need[0])
     for i in range(0, len(sheet_ids)):
         if int(sheet_ids[i]) == int(selected_sheet):
             selected_sheet_title = sheet_titles[i]
@@ -249,10 +313,11 @@ def handle_sheet_selection(call):
     # Подключаемся к Google Sheets
     service = get_google_service('sheets', 'v4', ['https://www.googleapis.com/auth/spreadsheets',
                                                   'https://www.googleapis.com/auth/drive'])
+    need = get_user_settings(call.message)
 
     # Читаем данные из выбранного листа
     response = service.spreadsheets().values().get(
-        spreadsheetId=SPREADSHEET_ID,
+        spreadsheetId=need[0],
         range=f'{selected_sheet_title}!B4:B'
     ).execute()
     values = response.get('values', [])  # Получаем значения из ответа
@@ -273,11 +338,13 @@ def handle_sheet_selection(call):
     else:
         bot.send_message(call.message.chat.id, "Данные не найдены.")
 
+
 # Отправка данных с пагинацией
 def ask_for_fanfic_title(chat_id):
     # Запрашиваем у пользователя название для поиска
     msg = bot.send_message(chat_id, "Введите часть названия фанфика:")
     bot.register_next_step_handler(msg, process_fanfic_title)
+
 
 def process_fanfic_title(message):
     chat_id = message.chat.id
@@ -285,6 +352,7 @@ def process_fanfic_title(message):
     user_data[chat_id]['search_text'] = text  # Сохраняем текст в данных пользователя
     # Теперь вызываем функцию для отображения только тех фанфиков, которые соответствуют поиску
     send_fanfics_page(chat_id)
+
 
 def send_fanfics_page(chat_id):
     fanfics = user_data[chat_id].get('all_fanfics', [])
@@ -343,6 +411,7 @@ def handle_pagination(call):
     user_data[chat_id]['current_page'] = new_page  # Обновляем текущую страницу
     send_fanfics_page(chat_id)  # Отправляем новую страницу данных
 
+
 # Обработчики действий
 @bot.callback_query_handler(func=lambda call: call.data.startswith('fanfic_'))
 def handle_fanfic_selection(call):
@@ -359,8 +428,10 @@ def handle_fanfic_selection(call):
 def send_fanfic_selection_message(chat_id, selected_fanfic):
     gc = gspread.service_account(filename=CREDENTIALS_FILE)
     sheet = user_data[chat_id]['selected_sheet']
+    need = get_user_settings2(chat_id)
+
     # Открываем таблицу по ее ID и выбираем нужный лист
-    spreadsheet = gc.open_by_key(SPREADSHEET_ID)
+    spreadsheet = gc.open_by_key(need[0])
     worksheet = spreadsheet.worksheet(sheet)
     cell = worksheet.find(user_data[chat_id]['titles_mapping'][selected_fanfic])
     row = cell.row
@@ -385,7 +456,7 @@ def handle_fanfic_read(call):
 # Функция отправки меню для оценки фанфика
 def send_rating_menu(chat_id, selected_fanfic):
     rating_markup = types.InlineKeyboardMarkup()
-    name = user_data[chat_id]['all_fanfics'][int(selected_fanfic)-4]
+    name = user_data[chat_id]['all_fanfics'][int(selected_fanfic) - 4]
     for i in range(1, 6):
         stars = '⭐' * i
         rating_markup.add(types.InlineKeyboardButton(text=stars, callback_data=f"rate_{selected_fanfic}_{i}"))
@@ -396,13 +467,14 @@ def send_rating_menu(chat_id, selected_fanfic):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('rate_'))
 def handle_fanfic_rating(call):
     chat_id = call.message.chat.id
+    need = get_user_settings(call.message)
     data = call.data.split('_')
     selected_fanfic = data[1]
     sheet = user_data[chat_id]['selected_sheet']
     rating_stars = '⭐' * int(data[2])
     gc = gspread.service_account(filename=CREDENTIALS_FILE)
     # Открываем таблицу по ее ID и выбираем нужный лист
-    spreadsheet = gc.open_by_key(SPREADSHEET_ID)
+    spreadsheet = gc.open_by_key(need[0])
     worksheet = spreadsheet.worksheet(sheet)
     row = int(selected_fanfic)
     worksheet.update_cell(row, 1, "TRUE")
@@ -415,13 +487,14 @@ def handle_fanfic_rating(call):
 @bot.callback_query_handler(func=lambda call: call.data == "back")
 def handle_back(call):
     chat_id = call.message.chat.id
+    need = get_user_settings(call.message)
     user_query = user_data.get(chat_id, {}).get('search_query', '')
     if user_query:
         service = get_google_service('sheets', 'v4', ['https://www.googleapis.com/auth/spreadsheets',
                                                       'https://www.googleapis.com/auth/drive'])
         response = service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f'{SHEET_NAME}!B4:B'
+            spreadsheetId=need[0],
+            range=f'{need[1]}!B4:B'
         ).execute()
 
         values = response.get('values', [])
@@ -441,7 +514,140 @@ def handle_back(call):
         bot.send_message(chat_id, "Нет данных для возврата.")
 
 
+# Подключение к Google Sheets через gspread
+def get_gspread_client():
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/spreadsheets",
+             "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
+    client = gspread.authorize(creds)
+    return client
+
+
+# Удаление существующих заголовков
+def normalize_title(title):
+    normalized = title.strip().lower()
+    normalized = re.sub(r'\[.*?\]', '', normalized)
+    normalized = re.sub(r'\s+', ' ', normalized)
+    normalized = re.sub(r'\s+', '', normalized)
+    return normalized
+
+
+def delete_existing_titles():
+    try:
+        chat_id = user_data[0]
+        need = get_user_settings2(chat_id)
+        client = get_gspread_client()
+        spreadsheet = client.open_by_key(need[0])
+
+        # Получаем данные из листа "Library"
+        library_sheet = spreadsheet.worksheet("Library")
+        library_titles = [normalize_title(row[0]) for row in library_sheet.col_values(2)[3:]]
+
+        def remove_titles_from_sheet(sheet_name):
+            sheet = spreadsheet.worksheet(sheet_name)
+            sheet_titles = sheet.col_values(2)[3:]
+
+            # Удаляем заголовки, которые уже есть в "Library"
+            updated_titles = [title for title in sheet_titles if normalize_title(title) not in library_titles]
+
+            # Обновляем данные в листе
+            sheet.update('B4', [[title] for title in updated_titles])
+
+        # Удаляем из листов "ФФ ВРИ" и "Минсоны"
+        remove_titles_from_sheet('ФФ ВРИ')
+        remove_titles_from_sheet('Минсоны')
+
+    except Exception as e:
+        print(f"Произошла ошибка: {e}")
+
+
+# Поиск
+def search(message):
+    client = get_gspread_client()
+    need = get_user_settings(message)
+    spreadsheet = client.open_by_key(need[0])
+
+    need = get_user_settings(message)
+
+    # Получаем названия всех листов
+    sheet_names = [sheet.title for sheet in spreadsheet.worksheets()]
+
+    # Создаем инлайн-кнопки для каждого листа
+    inline_markup = types.InlineKeyboardMarkup()
+    for sheet_name in sheet_names:
+        inline_markup.add(types.InlineKeyboardButton(text=sheet_name, callback_data=f"sheet_{sheet_name}"))
+
+    # Отправляем инлайн-кнопки пользователю
+    bot.send_message(message.chat.id, "Выберите лист для просмотра:", reply_markup=inline_markup)
+
+
+# Обработчик обновлений
+def update(message):
+    bot.send_message(message.chat.id, "Выберите лист, в котором хотите искать:")
+    need = get_user_settings(message)
+
+    client = get_gspread_client()
+    spreadsheet = client.open_by_key(need[0])
+
+    # Получаем названия листов
+    sheet_titles = [sheet.title for sheet in spreadsheet.worksheets()]
+
+    inline_markup = types.InlineKeyboardMarkup()
+    for sheet_title in sheet_titles:
+        inline_markup.add(types.InlineKeyboardButton(text=sheet_title, callback_data=f"sheetUp_{sheet_title}"))
+
+    # Отправляем инлайн-кнопки пользователю
+    bot.send_message(message.chat.id, "Выберите лист:", reply_markup=inline_markup)
+
+
+def random_fic(message):
+    bot.send_message(message.chat.id, "Выберите лист, который хотите. Я передумал.\nСделаю всё сам!")
+    need = get_user_settings(message)
+    try:
+        client = get_gspread_client()
+        spreadsheet = client.open_by_key(need[0])
+
+        # Получаем названия всех листов
+        sheet_names = [sheet.title for sheet in spreadsheet.worksheets()]
+
+        # Выбираем случайный лист
+        random_sheet_name = random.choice(sheet_names)
+        bot.send_message(message.chat.id, f"Я выбрал лист {random_sheet_name}")
+
+        # Получаем данные с выбранного листа
+        sheet = spreadsheet.worksheet(random_sheet_name)
+        values = sheet.get_all_values()[3:]  # Получаем все строки, начиная с 4-й
+
+        # Фильтруем данные, если в первом столбце не стоит "true" и второй столбец не пустой
+        filtered_values = [
+            row[1] for row in values if len(row) > 1 and row[1].strip() != '' and (row[0].strip().lower() != 'true')
+        ]
+
+        if filtered_values:
+            # Формируем список фанфиков
+            fanfics = [f"`{value}`" for value in filtered_values]
+            random_fanfic = random.choice(fanfics)
+            message_text = f"Это для вас:\n{random_fanfic}"
+        else:
+            message_text = "Нет доступных произведений на этом листе."
+
+        # Проверка на длину сообщения и отправка нескольких сообщений, если нужно
+        if len(message_text) > 4096:
+            # Если сообщение слишком длинное, разделим его на несколько частей
+            while len(message_text) > 4096:
+                bot.send_message(message.chat.id, message_text[:4096])
+                message_text = message_text[4096:]
+            # Отправляем оставшуюся часть
+            if message_text:
+                bot.send_message(message.chat.id, message_text)
+        else:
+            bot.send_message(message.chat.id, message_text, parse_mode='Markdown')
+
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Произошла ошибка: {e}")
+
+
 # Основной цикл для polling бота
 if __name__ == "__main__":
     set_bot_commands()
-    bot.infinity_polling(timeout = 10, long_polling_timeout = 5)
+    bot.infinity_polling(timeout=10, long_polling_timeout=5)
