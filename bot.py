@@ -1,6 +1,22 @@
 import random
 import configparser
 import re
+import logging
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,  # Уровень логирования
+    format='%(asctime)s - %(levelname)s - %(message)s',  # Формат логов
+    handlers=[
+        logging.FileHandler('bot.log', encoding='utf-8'),  # Запись логов в файл
+        logging.StreamHandler()  # Вывод логов в консоль
+    ],
+)
+
+logger = logging.getLogger(__name__)
+
+logger.info("Настройки загружены, бот инициализирован.")
+
 
 import gspread
 import telebot  # Импортируем модуль для работы с Telegram Bot API
@@ -11,10 +27,7 @@ from google_service import get_google_service  # Импортируем функ
 from epub_handle import readBook, document  # Импортируем функцию для чтения EPUB файлов
 from sql import init_db, add_new_user, get_user_settings, update_sheet_name, update_spreadsheet, get_user_settings2
 
-import logging
 
-# Отключаем все логи для всей программы
-logging.disable(logging.CRITICAL)
 
 
 config = configparser.ConfigParser()
@@ -43,6 +56,8 @@ def set_bot_commands():
         telebot.types.BotCommand('/settings', 'Настройки')
     ]
     bot.set_my_commands(commands)
+    logger.info("Команды бота установлены.")
+
 
 
 @bot.message_handler(commands=['del'])
@@ -55,11 +70,13 @@ def delete(message):
             bot.send_message(message.chat.id, f"Произошла ошибка: {e}")
     else:
         bot.reply_to(message, "Эта команда доступна только администратору.")
+    logger.info(f"Использована команда del")
 
 
 # Обработчик команды /start
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
+    logger.info(f"Пользователь {message.chat.id} вызвал команду /start.")
     bot.send_message(message.chat.id,
                      "Привет, я бот, который поможет следить тебе за потребляемым контентом. Я пока умею немного, но очень хочу помочь\n\n"
                      "Вот пример того, как выглядит моя таблица \n"
@@ -70,14 +87,17 @@ def send_welcome(message):
                     "Для начала работы зайди в /settings\n\n"
 
                      "!!!ВАЖНО!!!\n"
-                     "- бот пока работает только с epub\n"
+                     "- бот пока работает только с epub с ficbook\n"
                      "- Library в примере - лист, на который автоматически добалвяются фанфики, когда вы отправляете их в бот")
     init_db()
     # Добавляем нового пользователя или проверяем его существование в базе
     add_new_user(message.chat.id)
+    logger.info(f"Пользователь {message.chat.id} добавлен в базу данных.")
+
 
 @bot.message_handler(commands=['help'])
 def send_welcome(message):
+    logger.info(f"Пользователь {message.chat.id} использовал /help.")
     bot.send_message(message.chat.id,
                 "/search - "
                 "Эта команда выведет список всех листов, на которых вы модете посмотреть все свои произведения\n\n"
@@ -95,6 +115,7 @@ def send_welcome(message):
 
 @bot.message_handler(commands=['settings'])
 def handle_settings(message):
+    logger.info(f"Пользователь {message.chat.id} использовал /settings.")
     # Запросим, что именно нужно изменить
     bot.send_message(message.chat.id, "Тебе нужно:\n"
                                       "- указать ссылку на гугл таблицу, где у тебя будет твоя коллекция\n"
@@ -136,19 +157,24 @@ def handle_sheet_name(call):
 
 @bot.message_handler(commands=['random'])
 def handle_random(message):
+    logger.info(f"Пользователь {message.chat.id} использовал /random.")
     random_fic(message)
 
 
 @bot.message_handler(commands=['search'])
 def handle_search(message):
+    logger.info(f"Пользователь {message.chat.id} использовал /search.")
     try:
-        search(message)
+        result = search(message)  # Выполнение функции search
     except Exception as e:
         bot.send_message(message.chat.id, f"Произошла ошибка при получении листов: {e}")
 
 
+
 @bot.message_handler(commands=['add'])
 def send_add(message):
+    logger.info(f"Пользователь {message.chat.id} использовал /add.")
+
     bot.send_message(message.chat.id,
                      "Выберите лист куда хотите добавить произведение")
     try:
@@ -256,6 +282,7 @@ def handle_sheet_selection(call):
 
 @bot.message_handler(content_types=['document'])
 def handle_document(message):
+    logger.info(f"Пользователь {message.chat.id} добавил фанфик.")
     document(message)
 
 
@@ -270,6 +297,8 @@ def get_sheets_titles(service, spreadsheet_id):
 
 @bot.message_handler(commands=['update'])
 def handle_update(message):
+    logger.info(f"Пользователь {message.chat.id} использовал /update.")
+
     bot.send_message(message.chat.id, "Выберите лист, в котором хотите искать:")
     need = get_user_settings(message)
     # Подключаемся к Google Sheets
@@ -449,7 +478,7 @@ def send_fanfic_selection_message(chat_id, selected_fanfic):
 def handle_fanfic_read(call):
     chat_id = call.message.chat.id
     selected_fanfic = call.data[len('read_'):]  # Получаем строку выбранного фанфика
-    # Отправляем меню для оценки фанфика
+    logger.info(f"Пользователь {call.message.chat.id} прочитал selected_fanfic")
     send_rating_menu(chat_id, selected_fanfic)
 
 
@@ -480,7 +509,7 @@ def handle_fanfic_rating(call):
     worksheet.update_cell(row, 1, "TRUE")
     worksheet.update_cell(row, 3, rating_stars)
     name = user_data[chat_id]['all_fanfics'][int(selected_fanfic) - 4]
-
+    logger.info(f"Пользователь {call.message.chat.id} оценил {name[0]} на {rating_stars} звезд")
     bot.send_message(chat_id, f"Вы оценили фанфик '{name[0]}'\n на {rating_stars} звезд.")
 
 

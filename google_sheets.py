@@ -1,13 +1,9 @@
-import logging
-
-# Отключаем все логи для всей программы
-logging.disable(logging.CRITICAL)
-
 def is_record_exists(service, sheet_name, spreadsheet_id, search_value):
     range_to_check = f'{sheet_name}!B:B'
     response = service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=range_to_check).execute()
     values = response.get('values', [])
     return any(row and row[0] == search_value for row in values)
+
 
 def updateSpreadsheet(service, data, spreadsheet_id, sheet_name, file_id):
     data1, size, data2, data3, data4 = data[0], data[1], data[2], data[3], data[4]
@@ -31,17 +27,14 @@ def updateSpreadsheet(service, data, spreadsheet_id, sheet_name, file_id):
     request.execute()
 
 
-
 def updateSpreadsheetUP(service, data, spreadsheet_id):
-
-
     # Определение диапазона для вставки данных
     existing_rows = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id, range=f"{data[1]}!B:B").execute().get("values", [])
     range_to_insert = f'{data[1]}!A{data[0]}:C'
 
     # Данные для вставки
-    data_to_insert = [[data[2],data[3], data[4]]]
+    data_to_insert = [[data[2], data[3], data[4]]]
 
     # Обновление таблицы
     try:
@@ -55,6 +48,7 @@ def updateSpreadsheetUP(service, data, spreadsheet_id):
         print("Данные успешно обновлены!")
     except Exception as e:
         print(f"Ошибка при обновлении таблицы: {e}")
+
 
 def get_sheets_titles(service, spreadsheet_id):
     sheet_metadata = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()

@@ -11,11 +11,6 @@ import telebot
 from google_drive import upload_to_google_drive
 from google_sheets import updateSpreadsheet
 from sql import get_user_settings
-import warnings
-
-# Отключить все предупреждения
-warnings.filterwarnings("ignore")
-
 
 UPLOAD_FOLDER = "uploads"# Папка для загрузок
 ANOTHER = "other"

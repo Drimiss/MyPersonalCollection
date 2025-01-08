@@ -4,17 +4,13 @@ import sqlite3
 
 import telebot
 
-import logging
-
-# Отключаем все логи для всей программы
-logging.disable(logging.CRITICAL)
-
 config = configparser.ConfigParser()
 config.read('config.ini', encoding='utf-8')
 
 token = config.get('bot', 'token')
 admin = config.get('bot', 'AUTHORIZED_CHAT_ID')
 bot = telebot.TeleBot(token)  # Создаем экземпляр бота с указанным токеном
+
 
 def add_new_user(chat_id):
     conn = sqlite3.connect('example.db')
@@ -33,6 +29,7 @@ def add_new_user(chat_id):
 
     conn.commit()
     conn.close()
+
 
 # Функция для инициализации базы данных и добавления пользователя
 def init_db():
@@ -55,13 +52,11 @@ def init_db():
     conn.close()
 
 
-
-import sqlite3
-
 def connect_db():
     conn = sqlite3.connect('example.db')  # Укажите путь к вашей базе данных
     cursor = conn.cursor()
     return conn, cursor
+
 
 def update_db(chat_id, exelId=None, mainList=None):
     conn, cursor = connect_db()
@@ -89,18 +84,19 @@ def update_spreadsheet(message):
             bot.send_message(chat_id, "Excel успешно обновлен!")
         else:
             # Если регулярное выражение не сработало
-            raise ValueError("Неверная ссылка Excel")  # Это можно сделать, чтобы вызвать ошибку, если формат ссылки неверный
+            raise ValueError(
+                "Неверная ссылка Excel")  # Это можно сделать, чтобы вызвать ошибку, если формат ссылки неверный
     except Exception as e:
         # Логирование ошибки (если нужно)
         print(f"Error: {e}")
         bot.send_message(chat_id, "Что-то не так. Пожалуйста, отправьте правильную ссылку на Excel.")
+
 
 def update_sheet_name(message):
     chat_id = message.chat.id
     new_mainList = message.text  # Получаем новое название основного листа от пользователя
 
     update_db(chat_id, mainList=new_mainList)
-
 
 
 def update_user_data(chat_id, column_name, new_value):
@@ -145,6 +141,7 @@ def get_user_settings(message):
     finally:
         if connection:
             connection.close()
+
 
 def get_user_settings2(chat_id):
     try:
