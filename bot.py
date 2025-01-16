@@ -1,6 +1,3 @@
-import random
-import configparser
-import re
 import logging
 
 # Настройка логирования
@@ -15,24 +12,31 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+
+
+
+import random
+import configparser
+import re
+
 logger.info("Настройки загружены, бот инициализирован.")
 
 
 import gspread
 import telebot  # Импортируем модуль для работы с Telegram Bot API
 from oauth2client.service_account import ServiceAccountCredentials
+logger.info("Настройка логов завершена. Начинаем выполнение программы.")
 
 from telebot import types  # Импортируем классы для создания кнопок и клавиатур в Telegram
 from google_service import get_google_service  # Импортируем функцию для получения сервиса Google API
-from epub_handle import readBook, document  # Импортируем функцию для чтения EPUB файлов
+from epub_handle import  document  # Импортируем функцию для чтения EPUB файлов
 from sql import init_db, add_new_user, get_user_settings, update_sheet_name, update_spreadsheet, get_user_settings2
 
-
-
-
+# Загружаем конфигурацию
 config = configparser.ConfigParser()
 config.read('config.ini', encoding='utf-8')
 
+# Чтение параметров конфигурации
 token = config.get('bot', 'token')
 admin = config.get('bot', 'AUTHORIZED_CHAT_ID')
 CREDENTIALS_FILE = config.get('google', 'CREDENTIALS_FILE')
@@ -45,6 +49,7 @@ bot = telebot.TeleBot(token)  # Создаем экземпляр бота с у
 user_data = {}  # Словарь для хранения состояний пользователей
 
 
+# Функция для установки команд бота
 def set_bot_commands():
     commands = [
         telebot.types.BotCommand('/start', 'Начать работу с ботом'),
@@ -59,7 +64,6 @@ def set_bot_commands():
     logger.info("Команды бота установлены.")
 
 
-
 @bot.message_handler(commands=['del'])
 def delete(message):
     if str(message.chat.id).strip() == str(admin).strip():  # Проверка, является ли пользователь администратором
@@ -70,7 +74,6 @@ def delete(message):
             bot.send_message(message.chat.id, f"Произошла ошибка: {e}")
     else:
         bot.reply_to(message, "Эта команда доступна только администратору.")
-    logger.info(f"Использована команда del")
 
 
 # Обработчик команды /start
@@ -81,14 +84,14 @@ def send_welcome(message):
                      "Привет, я бот, который поможет следить тебе за потребляемым контентом. Я пока умею немного, но очень хочу помочь\n\n"
                      "Вот пример того, как выглядит моя таблица \n"
                      "https://docs.google.com/spreadsheets/d/1UDoYXpHov06Neix4UAcu-E4Kcy-yeDKjJlkR4NbA6OY/edit?usp=sharing\n"
-                     
+
                      "Её можно настроить и добавить фильтры, но это базовая вещь. Cаму структуру советую оставить, потому что бот научен ставить галочки и оценку из списка\n\n\n"
-                     
-                    "Для начала работы зайди в /settings\n\n"
+
+                     "Для начала работы зайди в /settings\n\n"
 
                      "!!!ВАЖНО!!!\n"
-                     "- бот пока работает только с epub с ficbook\n"
-                     "- Library в примере - лист, на который автоматически добалвяются фанфики, когда вы отправляете их в бот")
+                     "- бот пока работает только с epub\n"
+                     "- Library в примере - лист, на который автоматически добавляются фанфики, когда вы отправляете их в бот в формету .epub")
     init_db()
     # Добавляем нового пользователя или проверяем его существование в базе
     add_new_user(message.chat.id)
@@ -97,25 +100,26 @@ def send_welcome(message):
 
 @bot.message_handler(commands=['help'])
 def send_welcome(message):
-    logger.info(f"Пользователь {message.chat.id} использовал /help.")
     bot.send_message(message.chat.id,
-                "/search - "
-                "Эта команда выведет список всех листов, на которых вы модете посмотреть все свои произведения\n\n"
-                "/random - "
-                "Эта команда выберет с любого листа непрочитанное произведение\n\n"
-                "/add - "
-                "Эта команда позволяет добавлять произведение на выбранный лист\n\n"
+                     "/search - "
+                     "Эта команда выведет список всех листов, на которых вы можете посмотреть все свои произведения\n\n"
+                     "/random - "
+                     "Эта команда выберет с любого листа непрочитанное произведение\n\n"
+                     "/add - "
+                     "Эта команда позволяет добавлять произведение на выбранный лист\n\n"
                      "/update - "
-                "Эта команда поставит оценку произведению от 1 др 5 звезд\n\n"
+                     "Эта команда поставит оценку произведению от 1 до 5 звезд\n\n"
                      "/help - "
-                "Мы находимся здесь, тут ты сможешь вспомнить, что делает каждая кнопка\n\n"
+                     "Мы находимся здесь, тут ты сможешь вспомнить, что делает каждая кнопка\n\n"
                      "/settings - "
-                "Больше не понадобится тебе, если только ты не захочешь сменить основной лист или таблицу в гугл таблице\n\n"
-                "Если что-то не так, напишите мне @allDrimiss.\nЯ правда стараюсь(")
+                     "Больше не понадобится тебе, если только ты не захочешь сменить основной лист или таблицу в гугл таблице\n\n"
+                     "Если что-то не так, напишите мне @allDrimiss.\nЯ правда стараюсь(")
+
 
 @bot.message_handler(commands=['settings'])
 def handle_settings(message):
-    logger.info(f"Пользователь {message.chat.id} использовал /settings.")
+    logging.info(f"Пользователь {message.chat.id} вызвал команду /settings.")
+
     # Запросим, что именно нужно изменить
     bot.send_message(message.chat.id, "Тебе нужно:\n"
                                       "- указать ссылку на гугл таблицу, где у тебя будет твоя коллекция\n"
@@ -123,6 +127,8 @@ def handle_settings(message):
                                       "- дать доступ для редактирования вот этой почте\n admin-369@readbooks-432315.iam.gserviceaccount.com\n\n"
                                       "Это административная почта, я не смогу просматривать твои таблицы")
     send_inline_buttons(message)
+
+
 
 
 def send_inline_buttons(message):
@@ -140,11 +146,13 @@ def send_inline_buttons(message):
     except Exception as e:
         bot.send_message(message.chat.id, "Что-то не так. Попробуйте еще раз.")
 
+
 # Обработчик для кнопки 'spreadsheet' (изменить exelId)
 @bot.callback_query_handler(func=lambda call: call.data == 'spreadsheet')
 def handle_spreadsheet(call):
     chat_id = call.message.chat.id
-    bot.send_message(chat_id, "Пожалуйста, отправьте адрес Excel. Но не забудьте нажать на крести, чтобы отправилась только ссылка")
+    bot.send_message(chat_id,
+                     "Пожалуйста, отправьте адрес Excel. Но не забудьте нажать на крестик, чтобы отправилась только ссылка")
     bot.register_next_step_handler(call.message, update_spreadsheet)
 
 
@@ -157,46 +165,51 @@ def handle_sheet_name(call):
 
 @bot.message_handler(commands=['random'])
 def handle_random(message):
-    logger.info(f"Пользователь {message.chat.id} использовал /random.")
     random_fic(message)
 
 
 @bot.message_handler(commands=['search'])
 def handle_search(message):
-    logger.info(f"Пользователь {message.chat.id} использовал /search.")
     try:
         result = search(message)  # Выполнение функции search
+        logger.info(result)
     except Exception as e:
-        bot.send_message(message.chat.id, f"Произошла ошибка при получении листов: {e}")
+        logger.error(f"Произошла ошибка при получении листов у {message.chat.id}: {e}")
+        bot.send_message(message.chat.id, f"Возможно вы не ввели все данные в настройки или не добавлили редактора")
+
 
 
 
 @bot.message_handler(commands=['add'])
 def send_add(message):
-    logger.info(f"Пользователь {message.chat.id} использовал /add.")
-
-    bot.send_message(message.chat.id,
-                     "Выберите лист куда хотите добавить произведение")
+    logging.info(f"Пользователь {message.chat.id} вызвал команду /add.")
+    need = get_user_settings(message)
     try:
-        need = get_user_settings(message)
+        if need[0]=='' or need [1]=='':
+            raise ValueError("Недостаточно данных в need для продолжения")
+        else:
+            bot.send_message(message.chat.id, "Выберите лист, куда хотите добавить произведение.")
 
-        # Подключаемся к Google Sheets
-        service = get_google_service('sheets', 'v4', ['https://www.googleapis.com/auth/spreadsheets',
-                                                      'https://www.googleapis.com/auth/drive'])
+            # Подключаемся к Google Sheets
+            service = get_google_service('sheets', 'v4', ['https://www.googleapis.com/auth/spreadsheets',
+                                                          'https://www.googleapis.com/auth/drive'])
+            sheets_metadata = service.spreadsheets().get(spreadsheetId=need[0]).execute()
+            sheet_names = [sheet['properties']['title'] for sheet in sheets_metadata['sheets']]
+            sheet_names.remove(need[1])  # Исключаем основной лист
 
-        sheets_metadata = service.spreadsheets().get(spreadsheetId=need[0]).execute()
-        sheet_names = [sheet['properties']['title'] for sheet in sheets_metadata['sheets']]
+            # Создаём кнопки для выбора листа
+            inline_markup = types.InlineKeyboardMarkup()
+            for sheet_name in sheet_names:
+                inline_markup.add(types.InlineKeyboardButton(text=sheet_name, callback_data=f"sheet_add_{sheet_name}"))
 
-        sheet_names.remove(need[1])
+            bot.send_message(message.chat.id, "Выберите лист для просмотра:", reply_markup=inline_markup)
 
-        inline_markup = types.InlineKeyboardMarkup()
-        for sheet_name in sheet_names:
-            inline_markup.add(types.InlineKeyboardButton(text=sheet_name, callback_data=f"sheet_add_{sheet_name}"))
-
-        bot.send_message(message.chat.id, "Выберите лист для просмотра:", reply_markup=inline_markup)
-
+    except ValueError as ve:
+        logging.error(f"Ошибка данных need: {ve}", exc_info=True)
+        bot.send_message(message.chat.id, "У вас не заполнены настройки до конца или не добавлили редактора, операция не доступна")
     except Exception as e:
-        bot.send_message(message.chat.id, f"Произошла ошибка при получении листов: {e}")
+        logging.error(f"Общая ошибка: {e}", exc_info=True)
+        bot.send_message(message.chat.id, f"Произошла ошибка: {e}")
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("sheet_add_"))
@@ -282,8 +295,8 @@ def handle_sheet_selection(call):
 
 @bot.message_handler(content_types=['document'])
 def handle_document(message):
-    logger.info(f"Пользователь {message.chat.id} добавил фанфик.")
     document(message)
+
 
 
 # Получение названий листов в Google Sheets
@@ -297,26 +310,34 @@ def get_sheets_titles(service, spreadsheet_id):
 
 @bot.message_handler(commands=['update'])
 def handle_update(message):
-    logger.info(f"Пользователь {message.chat.id} использовал /update.")
-
-    bot.send_message(message.chat.id, "Выберите лист, в котором хотите искать:")
     need = get_user_settings(message)
-    # Подключаемся к Google Sheets
-    service = get_google_service('sheets', 'v4', ['https://www.googleapis.com/auth/spreadsheets',
-                                                  'https://www.googleapis.com/auth/drive'])
+    logging.info(f"Пользователь {message.chat.id} вызвал команду /update.")
+    try:
+        if need[0] == '' or need[1] == '':
+            raise ValueError("Недостаточно данных в need для продолжения")
+        else:
+            service = get_google_service('sheets', 'v4', ['https://www.googleapis.com/auth/spreadsheets',
+                                                          'https://www.googleapis.com/auth/drive'])
 
-    # Получаем названия листов
-    sheet_titles, sheet_ids = get_sheets_titles(service, need[0])
-    print(need)
-    # Создаем инлайн-кнопки с названиями листов
-    inline_markup = types.InlineKeyboardMarkup()
-    i = 0
-    for title in sheet_titles:
-        inline_markup.add(types.InlineKeyboardButton(text=title, callback_data=f"sheetUp_{str(sheet_ids[i])}"))
-        i += 1
+            # Получаем названия листов
+            sheet_titles, sheet_ids = get_sheets_titles(service, need[0])
 
-    # Отправляем инлайн-кнопки пользователю
-    bot.send_message(message.chat.id, "Выберите лист:", reply_markup=inline_markup)
+            # Создаем инлайн-кнопки с названиями листов
+            inline_markup = types.InlineKeyboardMarkup()
+            i = 0
+            for title in sheet_titles:
+                inline_markup.add(types.InlineKeyboardButton(text=title, callback_data=f"sheetUp_{str(sheet_ids[i])}"))
+                i += 1
+
+            # Отправляем инлайн-кнопки пользователю
+            bot.send_message(message.chat.id, "Выберите лист, в котором хотите искать:", reply_markup=inline_markup)
+
+    except ValueError as ve:
+        logging.error(f"Ошибка данных need: {ve}", exc_info=True)
+        bot.send_message(message.chat.id, "У вас не заполнены настройки до конца, операция не доступна")
+    except Exception as e:
+        logging.error(f"Общая ошибка: {e}", exc_info=True)
+        bot.send_message(message.chat.id, f"Произошла ошибка: {e}")
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('sheetUp_'))
@@ -342,8 +363,6 @@ def handle_sheet_selection(call):
     # Подключаемся к Google Sheets
     service = get_google_service('sheets', 'v4', ['https://www.googleapis.com/auth/spreadsheets',
                                                   'https://www.googleapis.com/auth/drive'])
-    need = get_user_settings(call.message)
-
     # Читаем данные из выбранного листа
     response = service.spreadsheets().values().get(
         spreadsheetId=need[0],
@@ -372,6 +391,7 @@ def handle_sheet_selection(call):
 def ask_for_fanfic_title(chat_id):
     # Запрашиваем у пользователя название для поиска
     msg = bot.send_message(chat_id, "Введите часть названия фанфика:")
+    logger.info(msg)
     bot.register_next_step_handler(msg, process_fanfic_title)
 
 
@@ -380,6 +400,7 @@ def process_fanfic_title(message):
     text = message.text.lower()  # Приводим текст к нижнему регистру для сравнения
     user_data[chat_id]['search_text'] = text  # Сохраняем текст в данных пользователя
     # Теперь вызываем функцию для отображения только тех фанфиков, которые соответствуют поиску
+
     send_fanfics_page(chat_id)
 
 
@@ -387,9 +408,11 @@ def send_fanfics_page(chat_id):
     fanfics = user_data[chat_id].get('all_fanfics', [])
     current_page = user_data[chat_id].get('current_page', 0)
     text = user_data[chat_id].get('search_text', '').lower()  # Получаем текст для поиска и приводим к нижнему регистру
-
-    # Фильтруем фанфики, которые удовлетворяют условию (поисковому запросу)
-    filtered_fanfics = [row for row in fanfics if text in row[0].lower()]
+    # Фильтрация с проверкой структуры
+    filtered_fanfics = [
+        row for row in fanfics
+        if isinstance(row, list) and len(row) > 0 and isinstance(row[0], str) and text in row[0].lower()
+    ]
 
     if not filtered_fanfics:
         bot.send_message(chat_id, "Не найдено ни одного фанфика, соответствующего вашему запросу.")
@@ -430,6 +453,7 @@ def send_fanfics_page(chat_id):
         # Отправляем новое сообщение
         message = bot.send_message(chat_id, message_text, reply_markup=inline_markup)
         user_data[chat_id]['message_id'] = message.message_id
+
 
 
 # Обработка нажатий на кнопки пагинации
@@ -478,7 +502,7 @@ def send_fanfic_selection_message(chat_id, selected_fanfic):
 def handle_fanfic_read(call):
     chat_id = call.message.chat.id
     selected_fanfic = call.data[len('read_'):]  # Получаем строку выбранного фанфика
-    logger.info(f"Пользователь {call.message.chat.id} прочитал selected_fanfic")
+    # Отправляем меню для оценки фанфика
     send_rating_menu(chat_id, selected_fanfic)
 
 
@@ -509,7 +533,7 @@ def handle_fanfic_rating(call):
     worksheet.update_cell(row, 1, "TRUE")
     worksheet.update_cell(row, 3, rating_stars)
     name = user_data[chat_id]['all_fanfics'][int(selected_fanfic) - 4]
-    logger.info(f"Пользователь {call.message.chat.id} оценил {name[0]} на {rating_stars} звезд")
+
     bot.send_message(chat_id, f"Вы оценили фанфик '{name[0]}'\n на {rating_stars} звезд.")
 
 
@@ -596,11 +620,10 @@ def search(message):
     need = get_user_settings(message)
     spreadsheet = client.open_by_key(need[0])
 
-    need = get_user_settings(message)
-
     # Получаем названия всех листов
     sheet_names = [sheet.title for sheet in spreadsheet.worksheets()]
 
+    logger.info(f"листы пользователя: {sheet_names}")
     # Создаем инлайн-кнопки для каждого листа
     inline_markup = types.InlineKeyboardMarkup()
     for sheet_name in sheet_names:
@@ -612,7 +635,6 @@ def search(message):
 
 # Обработчик обновлений
 def update(message):
-    bot.send_message(message.chat.id, "Выберите лист, в котором хотите искать:")
     need = get_user_settings(message)
 
     client = get_gspread_client()
@@ -626,13 +648,14 @@ def update(message):
         inline_markup.add(types.InlineKeyboardButton(text=sheet_title, callback_data=f"sheetUp_{sheet_title}"))
 
     # Отправляем инлайн-кнопки пользователю
-    bot.send_message(message.chat.id, "Выберите лист:", reply_markup=inline_markup)
+    bot.send_message(message.chat.id, "Выберите лист, в котором хотите искать:", reply_markup=inline_markup)
 
 
 def random_fic(message):
-    bot.send_message(message.chat.id, "Выберите лист, который хотите. Я передумал.\nСделаю всё сам!")
     need = get_user_settings(message)
     try:
+        bot.send_message(message.chat.id, "Выберите лист, который хотите. Я передумал.\nСделаю всё сам!")
+
         client = get_gspread_client()
         spreadsheet = client.open_by_key(need[0])
 
@@ -678,5 +701,11 @@ def random_fic(message):
 
 # Основной цикл для polling бота
 if __name__ == "__main__":
+    # Пример записи в лог
+    logger.info("Бот запущен.")
     set_bot_commands()
-    bot.infinity_polling(timeout=10, long_polling_timeout=5)
+    try:
+        bot.infinity_polling(timeout=10, long_polling_timeout=5)
+    except Exception as e:
+        print(f"Произошла ошибка: {e}")
+        print(f"Произошла ошибка: {e}")
