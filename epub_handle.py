@@ -29,7 +29,7 @@ admin = config.get('bot', 'AUTHORIZED_CHAT_ID')
 CREDENTIALS_FILE = config.get('google', 'CREDENTIALS_FILE')
 FOLDER_ID = config.get('google', 'FOLDER_ID')
 EMAIL_TO_SHARE = config.get('google', 'EMAIL_TO_SHARE')
-bot = telebot.TeleBot(token)  # Создаем экземпляр бота с указанным токеном
+# bot = telebot.TeleBot(token)  # Создаем экземпляр бота с указанным токеном
 
 from google_service import get_google_service
 
